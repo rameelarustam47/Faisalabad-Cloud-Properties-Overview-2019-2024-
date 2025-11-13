@@ -1,0 +1,54 @@
+// 1️⃣ Load Faisalabad boundary
+var districts = ee.FeatureCollection('projects/ee-usman47/assets/gadm41_PAK_2');
+var fsd = districts.filter(ee.Filter.eq('NAME_2', 'Faisalabad'));
+var region = fsd.geometry();
+Map.centerObject(fsd, 8);
+Map.addLayer(fsd, {color: 'blue'}, 'Faisalabad');
+
+// 2️⃣ Date range
+var startYear = 2019;
+var endYear = 2024;
+
+// 3️⃣ Sentinel-5P Cloud Product
+var s5p = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_CLOUD')
+            .select(['cloud_top_height','cloud_base_height','cloud_fraction']);
+
+// 4️⃣ Function to compute monthly cloud data
+function monthlyCloudData(year, month) {
+  var start = ee.Date.fromYMD(year, month, 1);
+  var end = start.advance(1, 'month');
+
+  var monthlyCollection = s5p.filterDate(start, end);
+  
+  // Skip months with no data
+  var count = monthlyCollection.size();
+  return ee.Algorithms.If(
+    count.gt(0),
+    ee.Feature(null, monthlyCollection.mean().reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: fsd,
+      scale: 1000,
+      maxPixels: 1e13
+    }).set('year', year).set('month', month)),
+    ee.Feature(null, ee.Dictionary({'cloud_top_height': null,'cloud_base_height': null,'cloud_fraction': null,'year': year,'month': month}))
+  );
+}
+
+// 5️⃣ Build FeatureCollection
+var features = [];
+for (var y = startYear; y <= endYear; y++) {
+  for (var m = 1; m <= 12; m++) {
+    features.push(monthlyCloudData(y, m));
+  }
+}
+
+// Filter out nulls
+var table = ee.FeatureCollection(features).filter(ee.Filter.notNull(['year']));
+
+// 6️⃣ Export CSV
+Export.table.toDrive({
+  collection: table,
+  description: 'Faisalabad_CloudTop_Base_Height_Fraction_2019_2024',
+  fileFormat: 'CSV'
+});
+
